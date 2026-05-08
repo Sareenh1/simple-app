@@ -34,3 +34,4 @@ docker run -p 3000:3000 simple-app:latest
 3. Creates approval issue
 4. Comment `/approve` to deploy
 5. Image pushed to Docker Hub and GitHub Container Registry
+
