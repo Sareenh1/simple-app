@@ -204,8 +204,8 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/simple-app:latest
-            ghcr.io/${{ github.repository_owner }}/simple-app:${{ github.sha }}
+            ghcr.io/${{ github.repository_owner | lower }}/simple-app:latest
+            ghcr.io/${{ github.repository_owner | lower }}/simple-app:${{ github.sha }}
 
       - name: Update deployment issue
         uses: actions/github-script@v7
@@ -218,7 +218,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: issueNumber,
-              body: `🎉 **DEPLOYED!**\n\n**Docker Hub:** \`docker pull ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:${{ github.sha }}\`\n\n**GitHub Registry:** \`docker pull ghcr.io/${{ github.repository_owner }}/simple-app:${{ github.sha }}\``
+              body: `🎉 **DEPLOYED!**\n\n**Docker Hub:** \`docker pull ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:${{ github.sha }}\`\n\n**GitHub Registry:** \`docker pull ghcr.io/${{ github.repository_owner | lower }}/simple-app:${{ github.sha }}\``
             });
             
             await github.rest.issues.update({
