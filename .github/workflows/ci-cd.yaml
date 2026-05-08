@@ -1,0 +1,230 @@
+name: Build, Test & Deploy
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run linting (if configured)
+        run: npm run lint 2>/dev/null || echo "No linting configured"
+
+      - name: Build Docker image
+        run: docker build -t simple-app:${{ github.sha }} .
+
+      - name: Test image runs
+        run: |
+          docker run --rm -d -p 3000:3000 --name test-app simple-app:${{ github.sha }}
+          sleep 2
+          curl -f http://localhost:3000/health || exit 1
+          docker stop test-app
+
+  push-image:
+    name: Push Docker Image
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:${{ github.sha }}
+          outputs: type=docker,dest=/tmp/image.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/image.tar
+          retention-days: 1
+
+      - name: Create deployment approval issue
+        id: create_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[DEPLOYMENT] simple-app:${{ github.sha }}`,
+              body: `🚀 New image ready for deployment!\n\n**Image Tag:** \`${{ github.sha }}\`\n**Branch:** \`${{ github.ref_name }}\`\n**Triggered by:** @${{ github.actor }}\n\n**Approve:** Comment \`/approve\` to push image to registry\n**Reject:** Comment \`/reject\` to cancel`,
+              labels: ['deployment', 'pending']
+            });
+            return issue.data.number;
+
+      - name: Save issue number
+        run: echo "${{ steps.create_issue.outputs.result }}" > issue_number.txt
+
+      - name: Upload issue number
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-info
+          path: issue_number.txt
+          retention-days: 1
+
+  wait-approval:
+    name: Wait for Approval
+    needs: push-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+
+    steps:
+      - name: Download issue number
+        uses: actions/download-artifact@v4
+        with:
+          name: issue-info
+
+      - name: Poll for approval
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issueNumber = parseInt(fs.readFileSync('issue_number.txt', 'utf8').trim());
+            
+            let approved = false;
+            let checkCount = 0;
+            const maxChecks = 1440;
+            
+            while (!approved && checkCount < maxChecks) {
+              checkCount++;
+              
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber
+              });
+              
+              for (const comment of comments.data) {
+                if (comment.body.trim() === '/approve') {
+                  approved = true;
+                  console.log(`✅ Approved by @${comment.user.login}`);
+                  
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: `✅ **APPROVED** - Pushing image to registry...`
+                  });
+                  
+                  break;
+                } else if (comment.body.trim() === '/reject') {
+                  core.setFailed('Deployment rejected');
+                  
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: `❌ **REJECTED** by @${comment.user.login}`
+                  });
+                  
+                  process.exit(1);
+                }
+              }
+              
+              if (!approved) {
+                console.log(`⏳ Waiting for approval... (${checkCount}/1440)`);
+                await new Promise(r => setTimeout(r, 60000));
+              }
+            }
+            
+            if (!approved) {
+              core.setFailed('Approval timeout');
+            }
+
+  deploy:
+    name: Deploy to Registry
+    needs: [push-image, wait-approval]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:${{ github.sha }}
+
+      - name: Build and push to GitHub Container Registry
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/simple-app:latest
+            ghcr.io/${{ github.repository_owner }}/simple-app:${{ github.sha }}
+
+      - name: Update deployment issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const issueNumber = parseInt(fs.readFileSync('issue_number.txt', 'utf8').trim());
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `🎉 **DEPLOYED!**\n\n**Docker Hub:** \`docker pull ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:${{ github.sha }}\`\n\n**GitHub Registry:** \`docker pull ghcr.io/${{ github.repository_owner }}/simple-app:${{ github.sha }}\``
+            });
+            
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed',
+              labels: ['deployment', 'completed']
+            });
