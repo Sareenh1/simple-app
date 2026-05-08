@@ -36,3 +36,4 @@ docker run -p 3000:3000 simple-app:latest
 5. Image pushed to Docker Hub and GitHub Container Registry
 
 # Fix permissions
+# Updated token
