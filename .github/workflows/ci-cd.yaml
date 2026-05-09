@@ -1,16 +1,9 @@
-name: Enterprise CI/CD Pipeline
+name: Environment Approval Demo
 
 on:
   push:
     branches:
       - main
-
-permissions:
-  contents: read
-  packages: write
-
-env:
-  IMAGE_NAME: simple-app
 
 jobs:
 
@@ -26,20 +19,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 18
-          cache: npm
 
       - name: Install Dependencies
         run: npm install
 
-      - name: Run Lint
-        run: npm run lint 2>/dev/null || echo "No lint configured"
-
       - name: Build Docker Image
-        run: docker build -t $IMAGE_NAME:${{ github.sha }} .
+        run: docker build -t simple-app:${{ github.sha }} .
 
-      - name: Test Container
+      - name: Run Health Check
         run: |
-          docker run -d -p 3000:3000 --name test-app $IMAGE_NAME:${{ github.sha }}
+          docker run -d -p 3000:3000 --name test-app simple-app:${{ github.sha }}
           sleep 5
           curl -f http://localhost:3000/health
           docker stop test-app
@@ -54,35 +43,14 @@ jobs:
       url: https://dev.example.com
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Deploy to DEV
+      - name: Deploy DEV
         run: |
-          echo "Deploying application to DEV environment"
-          echo "DEV deployment completed"
-
-  deploy-staging:
-    name: Deploy to STAGING
-    needs: deploy-dev
-    runs-on: ubuntu-latest
-
-    environment:
-      name: staging
-      url: https://staging.example.com
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Deploy to STAGING
-        run: |
-          echo "Deploying application to STAGING environment"
-          echo "STAGING deployment completed"
+          echo "Deploying to DEV environment"
+          echo "DEV deployment successful"
 
   deploy-production:
     name: Deploy to PRODUCTION
-    needs: deploy-staging
+    needs: deploy-dev
     runs-on: ubuntu-latest
 
     environment:
@@ -90,48 +58,7 @@ jobs:
       url: https://production.example.com
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Set lowercase repo owner
-        id: repo
+      - name: Deploy Production
         run: |
-          echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and Push Docker Hub Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/simple-app:${{ github.sha }}
-
-      - name: Build and Push GHCR Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ steps.repo.outputs.owner }}/simple-app:latest
-            ghcr.io/${{ steps.repo.outputs.owner }}/simple-app:${{ github.sha }}
-
-      - name: Production Deployment Complete
-        run: |
-          echo "Production deployment completed successfully"
+          echo "Deploying to PRODUCTION environment"
+          echo "Production deployment successful"
