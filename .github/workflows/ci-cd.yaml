@@ -5,11 +5,27 @@ on:
     branches:
       - main
 
+  workflow_dispatch:
+    inputs:
+      approve_production:
+        description: "Approve Production Deployment"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
 jobs:
 
   build-and-test:
+    if: github.event_name == 'push'
+
     name: Build & Test
     runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ github.sha }}
 
     steps:
       - name: Checkout Code
@@ -34,31 +50,52 @@ jobs:
           docker stop test-app
 
   deploy-dev:
+    if: github.event_name == 'push'
+
     name: Deploy to DEV
     needs: build-and-test
     runs-on: ubuntu-latest
 
-    environment:
-      name: dev
-      url: https://dev.example.com
-
     steps:
       - name: Deploy DEV
         run: |
-          echo "Deploying to DEV environment"
-          echo "DEV deployment successful"
+          echo "================================="
+          echo "Deploying to DEV Environment"
+          echo "Image: simple-app:${{ github.sha }}"
+          echo "DEV Deployment Successful"
+          echo "================================="
+
+      - name: Manual Approval Instructions
+        run: |
+          echo ""
+          echo "================================="
+          echo "PRODUCTION APPROVAL REQUIRED"
+          echo "================================="
+          echo ""
+          echo "To approve production deployment:"
+          echo ""
+          echo "1. Open GitHub Actions"
+          echo "2. Select this workflow"
+          echo "3. Click 'Run workflow'"
+          echo "4. Select:"
+          echo "   approve_production = true"
+          echo ""
+          echo "================================="
 
   deploy-production:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.approve_production == 'true'
+
     name: Deploy to PRODUCTION
-    needs: deploy-dev
     runs-on: ubuntu-latest
 
-    environment:
-      name: production
-      url: https://production.example.com
-
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       - name: Deploy Production
         run: |
-          echo "Deploying to PRODUCTION environment"
-          echo "Production deployment successful"
+          echo "================================="
+          echo "PRODUCTION APPROVED"
+          echo "Deploying to Production"
+          echo "Production Deployment Successful"
+          echo "================================="
