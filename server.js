@@ -20,7 +20,7 @@ app.get('/health', (req, res) => {
 
 app.get('/api/users', (req, res) => {
   res.json([
-    { id: 1, name: 'John Doe' },
+    { id: 1, name: 'John ' },
     { id: 2, name: 'Jane Smith' },
     { id: 3, name: 'Bob Johnson' }
   ]);
